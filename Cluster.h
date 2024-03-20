@@ -41,15 +41,7 @@ typedef struct Line3D
 	double Y2;
 	double Z2;							//线特征终点三维坐标
 	//double avgZ;
-	Line3D()
-	{
-		X1 = 0;
-		Y1 = 0;
-		Z1 = 0;
-		X2 = 0;
-		Y2 = 0;
-		Z2 = 0;
-	};
+	Line3D() : X1(0), Y1(0), Z1(0), X2(0), Y2(0), Z2(0) {}
 	Line3D(double X1, double Y1, double Z1, double X2, double Y2, double Z2) :X1(X1), Y1(Y1), Z1(Z1), X2(X2), Y2(Y2), Z2(Z2) {};
 };
 
@@ -164,10 +156,23 @@ struct PLYOptions
 //	void OutputClusterLine(const char* outputFile, EdgePoint endpoints);//输出聚类结果
 //	void OutputPointCloud(const char* outputFile, SphericalPoint sphericalPoint);//输出聚类结果
 //};
-
-class PointSimilarity
+namespace SpectralClustring
 {
-	std::vector<Line3D>lines;
-
-	static double linepearsonCorrelation(Line3D line1, Line3D line2);
-};
+	class PointSimilarity
+	{
+	private:
+		std::vector<Line3D>lines;
+		static double linepearsonCorrelation(Line3D line1, Line3D line2);
+		static double angleGap(Line3D line1, Line3D line2);
+	public:
+		void assignmentSimilarity();
+	};
+	typedef struct LinearFeature
+	{
+		double x_midpoint;
+		double y_midpoint;
+		double z_midpoint;
+		double latitude;
+		double longitude;
+	};
+}
