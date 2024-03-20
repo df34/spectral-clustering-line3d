@@ -206,3 +206,18 @@ double PointSimilarity::getSimilarity(int row, int col) const
     }
 }
 
+void SpectralClustring::LaplacianMatrix::calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix)
+{
+    metricMatrix.clear();
+    metricMatrix.resize(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
+
+    for (size_t i = 0; i < similarityMatrix.size(); ++i)
+    {
+        double sum = 0.0;
+        for (size_t j = 0; j < similarityMatrix[i].size(); ++j)
+        {
+            sum += similarityMatrix[i][j];
+        }
+        metricMatrix[i][i] = sum;
+    }
+}

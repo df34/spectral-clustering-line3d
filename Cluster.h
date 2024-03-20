@@ -77,8 +77,9 @@ namespace SpectralClustring
 	private:
 		std::vector<std::vector<double>> metricMatrix;
 		std::vector<std::vector<double>> LaplacianMatrix;
+		std::vector<std::vector<double>> similarityMatrix;
 
 	public:
-
+		void calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix);
 	};
 }
