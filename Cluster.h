@@ -83,6 +83,7 @@ namespace SpectralClustring
 	class LaplacianMatrix
 	{
 	private:
+		std::vector<Line3D>lines;
 		std::vector<std::vector<double>> metricMatrix;
 		std::vector<std::vector<double>> LaplacianMatrix;
 		std::vector<std::vector<double>> similarityMatrix;
@@ -113,5 +114,8 @@ namespace SpectralClustring
 		//同时考虑
 		int selectK(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
 		void kMeansClustering(const std::vector<std::pair<double, Eigen::VectorXd>>& eigen_pairs);
+		void fstreamLine();
 	};
+	void plyIput();
+	void spectralClustringComoleteFlowScheme();
 }

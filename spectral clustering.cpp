@@ -11,6 +11,7 @@
 #include<random>
 #include<algorithm>
 #include<opencv2/opencv.hpp>
+#include<fstream>
 //#include<matplotlibcpp.h>
 
 #define M_PI 3.14159265358979323846
@@ -669,11 +670,56 @@ void SpectralClustring::LaplacianMatrix::kMeansClustering(const std::vector<std:
 	}
 	std::cout << std::endl;
 
+	//每个节点的ID和其所在的聚类中心ID存储为一个键值对
+	for (size_t i = 0; i < data.size(); ++i) 
+	{
+		nodeClusterMap[i] = assignments[i];
+	}
+	// 输出每个节点所在的聚类中心 ID
+	std::cout << "Node ID -> Cluster center ID: " << std::endl;
+	for (const auto& pair : nodeClusterMap) {
+		std::cout << pair.first << " -> " << pair.second << std::endl;
+	}
 	//// 输出每个节点所在的聚类中心 ID
 	//std::cout << "Node ID -> Cluster center ID: " << std::endl;
 	//for (size_t i = 0; i < data.size(); ++i) {
 	//	std::cout << i << " -> " << assignments[i] << std::endl;
 	//}
+}
 
+void SpectralClustring::LaplacianMatrix::fstreamLine()
+{
+	std::ofstream outputFile("cluster_centers.txt");
+	if (!outputFile.is_open()) {
+		std::cerr << "Failed to open output file." << std::endl;
+		return;
+	}
+	for (int centerID : assignmentID)
+	{
+		for (const Line3D& line : lines)
+		{
+			if (line.ID == centerID)
+			{
+				outputFile << "Cluster Center ID: " << centerID << std::endl;
+				outputFile << "Line ID: " << line.ID << std::endl;
+				outputFile << "Line Start: (" << line.X1 << ", " << line.Y1 << ", " << line.Z1 << ")" << std::endl;
+				outputFile << "Line End: (" << line.X2 << ", " << line.Y2 << ", " << line.Z2 << ")" << std::endl;
+				outputFile << std::endl;
+				break;
+			}
+		}
+	}
+	outputFile.close();
+}
+
+void SpectralClustring::plyIput()
+{
+
+}
+
+
+
+void SpectralClustring::spectralClustringComoleteFlowScheme()
+{
 
 }
