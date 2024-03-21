@@ -5,6 +5,8 @@
 #include<Eigen/Sparse>
 //#include "rply.h"
 #include<fstream>
+#include <map>
+#include <unordered_map>
 using namespace std;
 //using namespace cv;
 #define RAD2DEG(x) ((x)*180./CV_PI)  //弧度转角度 
@@ -86,12 +88,30 @@ namespace SpectralClustring
 		std::vector<std::vector<double>> similarityMatrix;
 		Eigen::SparseMatrix<double> LaplacianMatrixSparse;
 		std::vector<std::pair<double, Eigen::VectorXd>> eigen_pairs;
+		std::vector<Eigen::VectorXd> eigenPairs;
+		std::vector<int>assignmentID;
+		std::unordered_map<int, int> nodeClusterMap;
 	public:
 		void calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix);
 		void calculateLaplacianMatrix();
+		//两种实现方式
+		void convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix);//稠密矩阵转为稀疏矩阵
+		void calSparseMatrix();//稠密矩阵转为稀疏矩阵
+		
+		void computeEigen();//计算特征值和特征向量
+		void fileterEigenPairs();//按照特征值大小进行排序，筛选特征值为0和除0以外最大的特征值
 
-		void convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix);
-		void calSparseMatrix();
-		void computeEigen();
+		void extractVector();//只获取特征向量
+		std::vector<int> kMeansClustering(const std::vector<Eigen::VectorXd>& data, int k, int maxIterations);
+		//肘部法则和轮廓系数
+		int selectKByElbowMethod(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
+		double silhouetteScore(const std::vector<Eigen::VectorXd>& data, const std::vector<int>& assignments);//返回轮廓系数，-1到1，距离1越近，效果越好
+		//聚类损失
+		double calculateClusterLoss(const std::vector<Eigen::VectorXd>& data, const std::vector<int>& assignments);
+		//绘制聚类损失曲线-肘部函数
+		//void plotSilhouetteAndLoss(const std::vector<double>& silhouetteScores, const std::vector<double>& clusterLosses, int maxK);
+		//同时考虑
+		int selectK(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
+		void kMeansClustering(const std::vector<std::pair<double, Eigen::VectorXd>>& eigen_pairs);
 	};
 }
