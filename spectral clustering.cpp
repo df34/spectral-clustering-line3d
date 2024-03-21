@@ -1,10 +1,20 @@
 ﻿#include"Cluster.h"
 #include<numeric>
 #include<cmath>
+#include <Eigen/SparseCore>
+#include <Eigen/SparseCholesky>
+#include<Eigen/Eigenvalues>
+#include<Eigen/src/Eigenvalues/EigenSolver.h>
+#include<Eigen/Sparse>
+#include <Spectra/SymEigsSolver.h>
+#include<Spectra/MatOp/SparseSymMatProd.h>
 
 #define M_PI 3.14159265358979323846
 using namespace SpectralClustring;
-
+using namespace Eigen;
+using namespace Spectra;
+typedef Eigen::SparseMatrix<double>SpMat;//声明一个doule类型的列主序稀疏矩阵
+typedef Eigen::Triplet<double>T;
 
 //计算了这两个坐标之间的差值作为方向向量，最后计算了这两个方向向量之间的相关性。
 double PointSimilarity::linepearsonCorrelation(Line3D line1, Line3D line2)
@@ -110,8 +120,8 @@ double SpectralClustring::PointSimilarity::straightLineDistance(Line3D line1, Li
     }
 
     // If lines do not intersect, calculate minimum distance to any of the endpoints
-    double dist1 = pointLineDistance(line1, { x3, y3, z3, x4, y4, z4 });
-    double dist2 = pointLineDistance(line2, { x1, y1, z1, x2, y2, z2 });
+    double dist1 = pointLineDistance(line1, { x3, y3, z3, x4, y4, z4 ,line1.ID });
+    double dist2 = pointLineDistance(line2, { x1, y1, z1, x2, y2, z2 ,line2.ID});
     return std::min(dist1, dist2);
 }
 
@@ -177,16 +187,41 @@ double SpectralClustring::PointSimilarity::normalizedLinepearsonCorrelation(doub
     return normalized;
 }
 
-double SpectralClustring::PointSimilarity::assignmentSimilarity()
+double SpectralClustring::PointSimilarity::assignmentSimilarity(Line3D line1,Line3D line2)
 {
-    double p1, p2, p3;
-
+    double p1=0.4, p2=0.3, p3=0.3;
+    double lineDistance = linepearsonCorrelation(line1, line2);
+    MinMaxDistance minMaxDistances =minMaxDistance();
+    double angle = angleGap(line1, line2);
+    double corr = linepearsonCorrelation(line1, line2);
+    double similarity = p1 * normalizedDistance(lineDistance, minMaxDistances) + p2 * normalizedAngleGap(angle) + p3 * normalizedLinepearsonCorrelation(corr);
+    return similarity;
 }
+
+void SpectralClustring::PointSimilarity::updateSimilarityMatrix(Line3D line1, Line3D line2)
+{
+    double similarity = assignmentSimilarity(line1, line2);
+
+    // 将计算的相似度赋给对应直线的行列
+    int id1 = line1.ID;
+    int id2 = line2.ID;
+
+    // 确保 similarityMatrix 具有足够的大小
+    int newSize = std::max(id1, id2) + 1;
+    if (similarityMatrix.size() < newSize)
+    {
+        similarityMatrix.resize(newSize, std::vector<double>(newSize, 0.0));
+    }
+
+    similarityMatrix[id1][id2] = similarity;
+    similarityMatrix[id2][id1] = similarity;
+}
+
 
 void SpectralClustring::PointSimilarity::Grapes()
 {
     for (size_t i = 0; i < lines.size(); ++i) {
-        serialNumberToIndexMap[lines[i].serialNumber] = i;
+        serialNumberToIndexMap[lines[i].ID] = i;
     }
 }
 
@@ -210,7 +245,7 @@ void SpectralClustring::LaplacianMatrix::calculateMetricMatrix(std::vector<std::
 {
     metricMatrix.clear();
     metricMatrix.resize(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
-
+    //计算对角线元素，对应节点的所有权值的累加值
     for (size_t i = 0; i < similarityMatrix.size(); ++i)
     {
         double sum = 0.0;
@@ -219,5 +254,123 @@ void SpectralClustring::LaplacianMatrix::calculateMetricMatrix(std::vector<std::
             sum += similarityMatrix[i][j];
         }
         metricMatrix[i][i] = sum;
+    }
+    for (size_t i = 0; i < metricMatrix.size(); ++i)
+    {
+        metricMatrix[i][i] = i; // 假设节点的ID就是索引值
+    }
+}
+
+void SpectralClustring::LaplacianMatrix::calculateLaplacianMatrix()
+{
+    LaplacianMatrix.clear();
+    LaplacianMatrix.resize(metricMatrix.size(), std::vector<double>(metricMatrix.size(), 0.0));
+
+    // 计算拉普拉斯矩阵
+    for (size_t i = 0; i < metricMatrix.size(); ++i)
+    {
+        for (size_t j = 0; j < metricMatrix[i].size(); ++j)
+        {
+            if (i == j)
+            {
+                // 对角线元素为节点的度数
+                LaplacianMatrix[i][j] = metricMatrix[i][j];
+            }
+            else
+            {
+                // 非对角线元素为相似度或连接权重的负值
+                LaplacianMatrix[i][j] = -metricMatrix[i][j];
+            }
+        }
+    }
+
+    // D - W
+    for (size_t i = 0; i < metricMatrix.size(); ++i)
+    {
+        for (size_t j = 0; j < metricMatrix[i].size(); ++j)
+        {
+            LaplacianMatrix[i][j] = metricMatrix[i][j] - LaplacianMatrix[i][j];
+        }
+    }
+}
+
+void SpectralClustring::LaplacianMatrix::convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix)
+{
+    int rows = denseMatrix.size();
+    int cols = denseMatrix[0].size();
+
+    // 创建一个稀疏矩阵
+    SparseMatrix<double> sparseMatrix(rows, cols);
+
+    // 遍历稠密矩阵，将非零元素添加到稀疏矩阵中
+    std::vector<Triplet<double>> triplets;
+    for (int i = 0; i < rows; ++i)
+    {
+        for (int j = 0; j < cols; ++j)
+        {
+            if (denseMatrix[i][j] != 0.0)
+            {
+                triplets.push_back(Triplet<double>(i, j, denseMatrix[i][j]));
+            }
+        }
+    }
+
+    sparseMatrix.setFromTriplets(triplets.begin(), triplets.end());
+
+    LaplacianMatrixSparse =sparseMatrix;
+}
+
+void SpectralClustring::LaplacianMatrix::calSparseMatrix()
+{ 
+    // 创建稀疏矩阵的三元组表示
+    std::vector<Eigen::Triplet<double>> tripletList;
+
+    // 遍历密集矩阵的元素，将非零元素添加到三元组列表中
+    for (int i = 0; i < LaplacianMatrix.size(); ++i) {
+        for (int j = 0; j < LaplacianMatrix[i].size(); ++j) {
+            if (LaplacianMatrix[i][j] != 0.0) {
+                tripletList.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrix[i][j]));
+            }
+        }
+    }
+
+    // 将三元组列表设置为稀疏矩阵的值
+    LaplacianMatrixSparse.setFromTriplets(tripletList.begin(), tripletList.end());
+
+    // 完成矩阵插入后进行最终化
+    LaplacianMatrixSparse.finalize();
+}
+
+void SpectralClustring::LaplacianMatrix::computeEigen()
+{
+    /*EigenSolver<SpMat>es(LaplacianMatrixSparse);
+    VectorXcd eigenvalues = es.eigenvalues();
+    MatrixXcd eigenvectors = es.eigenvectors();*/
+    SparseSymMatProd<double>op(LaplacianMatrixSparse);
+    Spectra::SymEigsSolver< Spectra::SparseSymMatProd<double> > eigs(op, LaplacianMatrixSparse.rows(), 2*LaplacianMatrixSparse.rows());
+    eigs.init();
+    int nconv = eigs.compute();
+    // 获取特征值
+    Eigen::VectorXd eigenvalues;
+    if (eigs.info() == Spectra::CompInfo::Successful)
+    {
+        eigenvalues = eigs.eigenvalues();
+    }
+    // 获取特征向量
+    Eigen::MatrixXd eigenvectors;
+    if (eigs.info() == Spectra::CompInfo::Successful)
+    {
+        eigenvectors = eigs.eigenvectors();
+    }
+    // 将特征值和特征向量存储到一个键对的数组中
+    
+    for (int i = 0; i < eigenvalues.size(); ++i) {
+        eigen_pairs.push_back(std::make_pair(eigenvalues[i], eigenvectors.col(i)));
+    }
+
+    // 打印特征值和特征向量
+    for (const auto& pair : eigen_pairs) {
+        std::cout << "Eigenvalue: " << pair.first << std::endl;
+        std::cout << "Eigenvector: " << pair.second.transpose() << std::endl;
     }
 }

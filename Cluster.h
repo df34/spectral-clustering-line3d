@@ -1,14 +1,16 @@
 ﻿#pragma once
 #include<iostream>
 #include<vector>
-#include<opencv2/opencv.hpp>
+//#include<opencv2/opencv.hpp>
+#include<Eigen/Sparse>
 //#include "rply.h"
 #include<fstream>
 using namespace std;
-using namespace cv;
+//using namespace cv;
 #define RAD2DEG(x) ((x)*180./CV_PI)  //弧度转角度 
 #define DEG2RAD(x) ((x)*CV_PI/180.0)  //角度转弧度
 #define RESOLUTION 0.0011389
+
 
 typedef struct Line3D
 {
@@ -18,11 +20,32 @@ typedef struct Line3D
 	double X2;
 	double Y2;
 	double Z2;							//线特征终点三维坐标
-	int serialNumber;
+	int ID;
 	//double avgZ;
-	Line3D() : X1(0), Y1(0), Z1(0), X2(0), Y2(0), Z2(0) ,serialNumber(0){}
-	Line3D(double X1, double Y1, double Z1, double X2, double Y2, double Z2) :X1(X1), Y1(Y1), Z1(Z1), X2(X2), Y2(Y2), Z2(Z2) ,serialNumber(serialNumber){};
+	Line3D() : X1(0), Y1(0), Z1(0), X2(0), Y2(0), Z2(0), ID(0) {}
+	Line3D(double X1, double Y1, double Z1, double X2, double Y2, double Z2,int ID) :X1(X1), Y1(Y1), Z1(Z1), X2(X2), Y2(Y2), Z2(Z2), ID(ID) {};
 };
+
+using LinearFeature = struct
+{
+	double x_midpoint;
+	double y_midpoint;
+	double z_midpoint;
+	double latitude;
+	double longitude;
+};
+typedef struct MinMaxDistance
+{
+	double minDistance;
+	double maxDistance;
+};
+typedef struct SimilarityBetweenTheLines
+{
+	double distance;
+	double angle;
+	double corr;
+};
+
 
 namespace SpectralClustring
 {
@@ -49,28 +72,11 @@ namespace SpectralClustring
 		MinMaxDistance minMaxDistance();
 
 	public:
-		double assignmentSimilarity();
+		double assignmentSimilarity(Line3D line1,Line3D lin2);
+		void updateSimilarityMatrix(Line3D line1, Line3D line2);
 		double getSimilarity(int row, int col) const;
 	};
-	typedef struct LinearFeature
-	{
-		double x_midpoint;
-		double y_midpoint;
-		double z_midpoint;
-		double latitude;
-		double longitude;
-	};
-	typedef struct MinMaxDistance
-	{
-		double minDistance;
-		double maxDistance;
-	};
-	typedef struct SimilarityBetweenTheLines
-	{
-		double distance;
-		double angle;
-		double corr;
-	};
+	
 
 	class LaplacianMatrix
 	{
@@ -78,8 +84,14 @@ namespace SpectralClustring
 		std::vector<std::vector<double>> metricMatrix;
 		std::vector<std::vector<double>> LaplacianMatrix;
 		std::vector<std::vector<double>> similarityMatrix;
-
+		Eigen::SparseMatrix<double> LaplacianMatrixSparse;
+		std::vector<std::pair<double, Eigen::VectorXd>> eigen_pairs;
 	public:
 		void calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix);
+		void calculateLaplacianMatrix();
+
+		void convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix);
+		void calSparseMatrix();
+		void computeEigen();
 	};
 }
