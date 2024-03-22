@@ -78,22 +78,22 @@ double SpectralClustring::PointSimilarity::angleGap(Line3D line1, Line3D line2)
 }
 
 
-LinearFeature SpectralClustring::PointSimilarity::linearFeature(Line3D line)
-{
-	LinearFeature feature;
-
-	// Calculate midpoint coordinates
-	feature.x_midpoint = (line.X1 + line.X2) / 2.0;
-	feature.y_midpoint = (line.Y1 + line.Y2) / 2.0;
-	feature.z_midpoint = (line.Z1 + line.Z2) / 2.0;
-
-	// Calculate latitude and longitude
-	double radius = std::sqrt(std::pow(feature.x_midpoint, 2) + std::pow(feature.y_midpoint, 2) + std::pow(feature.z_midpoint, 2));
-	feature.latitude = std::asin(feature.z_midpoint / radius) * 180.0 / M_PI;
-	feature.longitude = std::atan2(feature.y_midpoint, feature.x_midpoint) * 180.0 / M_PI;
-
-	return feature;
-}
+//LinearFeature SpectralClustring::PointSimilarity::linearFeature(Line3D line)
+//{
+//	LinearFeature feature;
+//
+//	// Calculate midpoint coordinates
+//	feature.x_midpoint = (line.X1 + line.X2) / 2.0;
+//	feature.y_midpoint = (line.Y1 + line.Y2) / 2.0;
+//	feature.z_midpoint = (line.Z1 + line.Z2) / 2.0;
+//
+//	// Calculate latitude and longitude
+//	double radius = std::sqrt(std::pow(feature.x_midpoint, 2) + std::pow(feature.y_midpoint, 2) + std::pow(feature.z_midpoint, 2));
+//	feature.latitude = std::asin(feature.z_midpoint / radius) * 180.0 / M_PI;
+//	feature.longitude = std::atan2(feature.y_midpoint, feature.x_midpoint) * 180.0 / M_PI;
+//
+//	return feature;
+//}
 
 double SpectralClustring::PointSimilarity::straightLineDistance(Line3D line1, Line3D line2)
 {
@@ -158,7 +158,8 @@ double SpectralClustring::PointSimilarity::normalizedDistance(double lineDistanc
 
 	// 将 lineDistance 归一化到 [0, 1] 范围内
 	double normalized = (lineDistance - minDistance) / (maxDistance - minDistance);
-	return normalized;
+	double negetedNormalized = 1.0 - normalized;
+	return negetedNormalized;
 }
 
 
@@ -167,12 +168,14 @@ MinMaxDistance SpectralClustring::PointSimilarity::minMaxDistance()
 	double minDist = std::numeric_limits<double>::max();
 	double maxDist = std::numeric_limits<double>::lowest();
 
-	for (const auto& line : lines) {
-		double dist = // Calculate distance of line using line.X1, line.Y1, etc.
+	for (const auto& line1 : lines)
+	{
+		for (const auto& line2 : lines) {
+			double dist = straightLineDistance(line1,line2);
 			minDist = std::min(minDist, dist);
-		maxDist = std::max(maxDist, dist);
+			maxDist = std::max(maxDist, dist);
+		}
 	}
-
 	return { minDist, maxDist };
 }
 
@@ -185,7 +188,8 @@ double SpectralClustring::PointSimilarity::normalizedAngleGap(double angle)
 	}
 	// 归一化到 [0, 1] 范围内
 	double normalized = angle / (2 * M_PI);
-	return normalized;
+	double negetedNormalized = 1.0 - normalized;
+	return negetedNormalized;
 }
 double SpectralClustring::PointSimilarity::normalizedLinepearsonCorrelation(double linCorr)
 {
@@ -710,16 +714,166 @@ void SpectralClustring::LaplacianMatrix::fstreamLine()
 		}
 	}
 	outputFile.close();
+
+
+
+
 }
 
-void SpectralClustring::plyIput()
+std::vector<Line3D> SpectralClustring::readLinesFromPLY(const std::string& filename)
 {
+	std::vector<Line3D> lines;
+	std::ifstream inputFile(filename);
+	if (!inputFile.is_open()) {
+		std::cerr << "Error opening file: " << filename << std::endl;
+		return lines;
+	}
 
+	std::string line;
+	int id = 0;
+	Point3D prevPoint;
+	bool isFirstPoint = true;
+
+	while (std::getline(inputFile, line)) {
+		std::istringstream iss(line);
+		if (isFirstPoint) {
+			if (line.find("element vertex") != std::string::npos) {
+				int numVertices;
+				iss >> numVertices;
+				id = 0;
+			}
+			else if (line == "end_header") {
+				isFirstPoint = false;
+			}
+		}
+		else {
+			Point3D point;
+			iss >> point.X >> point.Y >> point.Z;
+			if (id % 2 != 0) { // Connect odd IDs to form lines
+				Line3D line3d;
+				line3d.X1 = prevPoint.X;
+				line3d.Y1 = prevPoint.Y;
+				line3d.Z1 = prevPoint.Z;
+				line3d.X2 = point.X;
+				line3d.Y2 = point.Y;
+				line3d.Z1 = point.Z;
+				line3d.ID = id / 2; // ID for the line
+				lines.push_back(line3d);
+			}
+			prevPoint = point;
+			++id;
+		}
+	}
+
+	inputFile.close();
+	return lines;
 }
 
-
-
-void SpectralClustring::spectralClustringComoleteFlowScheme()
+void SpectralClustring::LaplacianMatrix::writeLinesToPLY(const std::string& filename, const std::vector<Line3D>& lines, const std::vector<int>& centerIDs)
 {
+	std::ofstream outputFile(filename);
 
+	if (!outputFile.is_open())
+	{
+		std::cerr << "Failed to open file for writing: " << filename << std::endl;
+		return;
+	}
+
+	// 写入PLY文件头部
+	outputFile << "ply" << std::endl;
+	outputFile << "format ascii 1.0" << std::endl;
+	outputFile << "element vertex " << centerIDs.size() * 2 << std::endl;
+	outputFile << "property float x" << std::endl;
+	outputFile << "property float y" << std::endl;
+	outputFile << "property float z" << std::endl;
+	outputFile << "element edge " << centerIDs.size() << std::endl;
+	outputFile << "property int vertex1" << std::endl;
+	outputFile << "property int vertex2" << std::endl;
+	outputFile << "end_header" << std::endl;
+
+	// 写入线的顶点信息
+	for (size_t i = 0; i < centerIDs.size(); ++i)
+	{
+		for (const Line3D& line : lines)
+		{
+			if (line.ID == centerIDs[i])
+			{
+				outputFile << line.X1 << " " << line.Y1 << " " << line.Z1 << std::endl;
+				outputFile << line.X2 << " " << line.Y2 << " " << line.Z2 << std::endl;
+				break;
+			}
+		}
+	}
+
+	// 写入线的连接信息
+	for (size_t i = 0; i < centerIDs.size(); ++i)
+	{
+		outputFile << i * 2 << " " << i * 2 + 1 << std::endl;
+	}
+
+	outputFile.close();
+}
+
+//std::vector<Line3D> SpectralClustring::LaplacianMatrix::outPutCentreLine()
+//{
+//	for (int targetID : assignmentID)
+//	{
+//		try {
+//			Line3D foundLine = findLineByID(targetID);
+//
+//		}
+//	}
+//}
+//Line3D SpectralClustring::LaplacianMatrix::findLineByID(int targetID) const
+//{
+//	for (const Line3D& line : lines) {
+//		if (line.ID == targetID) {
+//			return line;
+//		}
+//	}
+//	// 如果没有找到匹配的ID，则可以返回一个默认的Line3D对象或抛出异常，具体取决于你的需求
+//	throw std::runtime_error("Line with ID " + std::to_string(targetID) + " not found.");
+//}
+
+
+void SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>inputLines)
+{
+	SpectralClustring::PointSimilarity lineSimilarityMatrix;
+	lineSimilarityMatrix.getLine(inputLines);
+	for (const auto& line1 : lineSimilarityMatrix.outLine())
+	{
+		for (const auto& line2 : lineSimilarityMatrix.outLine())
+		{
+			lineSimilarityMatrix.updateSimilarityMatrix(line1,line2);
+		}
+	}
+	
+	
+}
+
+void SpectralClustring::PointSimilarity::getLine(std::vector<Line3D>inputLines)
+{
+	lines = inputLines;
+}
+std::vector<Line3D> SpectralClustring::PointSimilarity::outLine()
+{
+	return lines;
+}
+std::vector<std::vector<double>> SpectralClustring::PointSimilarity::outPutSimilarity()
+{
+	return similarityMatrix;
+}
+
+void SpectralClustring::LaplacianMatrix::calcuCluster()
+{
+	calculateMetricMatrix(similarityMatrix);
+	calculateLaplacianMatrix();
+	convertToSparseMatrix(LaplacianMatrix);
+	computeEigen();
+	fileterEigenPairs();
+	extractVector();
+	kMeansClustering(eigen_pairs);
+	fstreamLine();
+	string filename = "cluster";
+	writeLinesToPLY(filename,lines,assignmentID);
 }

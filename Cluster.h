@@ -13,6 +13,12 @@ using namespace std;
 #define DEG2RAD(x) ((x)*CV_PI/180.0)  //角度转弧度
 #define RESOLUTION 0.0011389
 
+struct Point3D
+{
+	double X;
+	double Y;
+	double Z;
+};
 
 typedef struct Line3D
 {
@@ -58,25 +64,29 @@ namespace SpectralClustring
 		std::vector<std::vector<double>> similarityMatrix;
 		// 创建一个映射，将 serialNumber 映射到索引
 		std::map<int, size_t> serialNumberToIndexMap;
-		void Grapes();
+		void Grapes();//线段ID存储
 
 
-		double linepearsonCorrelation(Line3D line1, Line3D line2);
-		double angleGap(Line3D line1, Line3D line2);
-		LinearFeature linearFeature(Line3D line);
+		double linepearsonCorrelation(Line3D line1, Line3D line2);//直线间相似性计算：-1至1，越接近1越相似
+		double angleGap(Line3D line1, Line3D line2);//直线间角度差计算，返回弧度值
+		LinearFeature linearFeature(Line3D line);//计算单条直线在坐标系下的中点坐标，与x轴y轴的夹角
 
-		double straightLineDistance(Line3D line1, Line3D line2);
-		double pointLineDistance(Line3D line, Line3D point);
+		double straightLineDistance(Line3D line1, Line3D line2);//计算直线间距离
+		double pointLineDistance(Line3D line, Line3D point);//如果平行，则计算点与直线的距离
 
-		double normalizedDistance(double lineDistance,MinMaxDistance distance);
-		double normalizedAngleGap(double angle);
-		double normalizedLinepearsonCorrelation(double linCorr);
-		MinMaxDistance minMaxDistance();
+		double normalizedDistance(double lineDistance,MinMaxDistance distance);//归一化距离,取反
+		double normalizedAngleGap(double angle);//归一化角度差，取反
+		double normalizedLinepearsonCorrelation(double linCorr);//归一化直线相似性
+		MinMaxDistance minMaxDistance();//计算所有空间直线的最大最小距离
 
 	public:
-		double assignmentSimilarity(Line3D line1,Line3D lin2);
-		void updateSimilarityMatrix(Line3D line1, Line3D line2);
-		double getSimilarity(int row, int col) const;
+		void getLine(std::vector<Line3D>);
+		std::vector<Line3D>outLine();
+		double assignmentSimilarity(Line3D line1,Line3D lin2);//综合计算直线间的相似性系数
+		void updateSimilarityMatrix(Line3D line1, Line3D line2);//更新相似矩阵
+		double getSimilarity(int row, int col) const;//获取对应行列相似矩阵的值
+		std::vector<std::vector<double>>outPutSimilarity();
+		
 	};
 	
 
@@ -90,11 +100,12 @@ namespace SpectralClustring
 		Eigen::SparseMatrix<double> LaplacianMatrixSparse;
 		std::vector<std::pair<double, Eigen::VectorXd>> eigen_pairs;
 		std::vector<Eigen::VectorXd> eigenPairs;
-		std::vector<int>assignmentID;
-		std::unordered_map<int, int> nodeClusterMap;
+		std::vector<int>assignmentID;//聚类中心ID
+		std::unordered_map<int, int> nodeClusterMap;//每个节点所在的聚类中心
+		//std::vector<Line3D> outPutCentreLine();
 	public:
-		void calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix);
-		void calculateLaplacianMatrix();
+		void calculateMetricMatrix(std::vector<std::vector<double>>& similarityMatrix);//计算度矩阵
+		void calculateLaplacianMatrix();//计算拉普拉斯矩阵
 		//两种实现方式
 		void convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix);//稠密矩阵转为稀疏矩阵
 		void calSparseMatrix();//稠密矩阵转为稀疏矩阵
@@ -114,8 +125,11 @@ namespace SpectralClustring
 		//同时考虑
 		int selectK(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
 		void kMeansClustering(const std::vector<std::pair<double, Eigen::VectorXd>>& eigen_pairs);
-		void fstreamLine();
+		void fstreamLine();//输出聚类中心的点的坐标
+		void calcuCluster();
+		void writeLinesToPLY(const std::string& filename, const std::vector<Line3D>& lines, const std::vector<int>& centerIDs);
+		//Line3D findLineByID(int targetID)const;
 	};
-	void plyIput();
-	void spectralClustringComoleteFlowScheme();
+	std::vector<Line3D> readLinesFromPLY(const std::string& filename);
+	void spectralClustringComoleteFlowScheme(std::vector<Line3D>);
 }
