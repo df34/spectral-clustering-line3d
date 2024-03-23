@@ -757,7 +757,7 @@ std::vector<Line3D> SpectralClustring::readLinesFromPLY(const std::string& filen
 				line3d.Z1 = prevPoint.Z;
 				line3d.X2 = point.X;
 				line3d.Y2 = point.Y;
-				line3d.Z1 = point.Z;
+				line3d.Z2 = point.Z;
 				line3d.ID = id / 2; // ID for the line
 				lines.push_back(line3d);
 			}
