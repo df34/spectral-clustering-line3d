@@ -12,6 +12,7 @@
 #include<algorithm>
 #include<opencv2/opencv.hpp>
 #include<fstream>
+#include<chrono>
 //#include<matplotlibcpp.h>
 
 #define M_PI 3.14159265358979323846
@@ -768,6 +769,44 @@ std::vector<Line3D> SpectralClustring::readLinesFromPLY(const std::string& filen
 	inputFile.close();
 	return lines;
 }
+bool SpectralClustring::readPointFromPLY(const std::string& filename, std::vector<Vertex>& vertices)
+{
+	std::ifstream file(filename);
+	if (!file.is_open()) {
+
+		std::cout << "Failed to open file: " << filename << std::endl;
+
+		return false;
+	}
+
+	std::string line;
+	std::getline(file, line); // Read the first line
+
+	// Read header
+	int numVertices = 0;
+	while (line.find("end_header") == std::string::npos) {
+		std::getline(file, line);
+
+		if (line.find("element vertex") != std::string::npos) {
+			std::istringstream iss(line);
+			std::string element, vertex;
+			int count;
+
+			iss >> element >> vertex >> count;
+			numVertices = count;
+		}
+	}
+
+	// Read vertices
+	vertices.resize(numVertices);
+	for (int i = 0; i < numVertices; ++i) {
+		file >> vertices[i].x >> vertices[i].y >> vertices[i].z
+			>> vertices[i].r >> vertices[i].g >> vertices[i].b;
+	}
+
+	file.close();
+	return true;
+}
 
 void SpectralClustring::LaplacianMatrix::writeLinesToPLY(const std::string& filename, const std::vector<Line3D>& lines, const std::vector<int>& centerIDs)
 {
@@ -838,6 +877,7 @@ void SpectralClustring::LaplacianMatrix::writeLinesToPLY(const std::string& file
 
 void SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>inputLines)
 {
+	auto start = std::chrono::high_resolution_clock::now();
 	SpectralClustring::PointSimilarity lineSimilarityMatrix;
 	lineSimilarityMatrix.getLine(inputLines);
 	for (const auto& line1 : lineSimilarityMatrix.outLine())
@@ -848,7 +888,9 @@ void SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>i
 		}
 	}
 	
-	
+	auto end = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> duration = end - start;
+	std::cout << "Calculate Similarity Matrix execution time: " << duration.count() << " seconds" << std::endl;
 }
 
 void SpectralClustring::PointSimilarity::getLine(std::vector<Line3D>inputLines)
@@ -866,14 +908,43 @@ std::vector<std::vector<double>> SpectralClustring::PointSimilarity::outPutSimil
 
 void SpectralClustring::LaplacianMatrix::calcuCluster()
 {
+	auto start1 = std::chrono::high_resolution_clock::now();
 	calculateMetricMatrix(similarityMatrix);
+	auto end1 = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> duration1 = end1 - start1;
+	std::cout << "Calculate metric matrix execution time: " << duration1.count() << " seconds" << std::endl;
+	auto start2 = std::chrono::high_resolution_clock::now();
 	calculateLaplacianMatrix();
+	auto end2 = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> duration2 = end2 - start2;
+	std::cout << "Calculate LaplacianMatrix matrix execution time: " << duration2.count() << " seconds" << std::endl;
 	convertToSparseMatrix(LaplacianMatrix);
+	auto start3 = std::chrono::high_resolution_clock::now();
 	computeEigen();
+	auto end3 = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> duration3 = end3 - start3;
+	std::cout << "Calculate eigenvalues eigenvectors execution time: " << duration3.count() << " seconds" << std::endl;
 	fileterEigenPairs();
 	extractVector();
+	auto start4 = std::chrono::high_resolution_clock::now();
 	kMeansClustering(eigen_pairs);
+	auto end4 = std::chrono::high_resolution_clock::now();
+	std::chrono::duration<double> duration4 = end4 - start4;
+	std::cout << "Calculate Kmeans execution time: " << duration4.count() << " seconds" << std::endl;
 	fstreamLine();
 	string filename = "cluster";
 	writeLinesToPLY(filename,lines,assignmentID);
+}
+
+std::vector<Line3D> SpectralClustring::LaplacianMatrix::outLines()
+{
+	return lines;
+}
+std::vector<int> SpectralClustring::LaplacianMatrix::outID()
+{
+	return assignmentID;
+}
+void SpectralClustring::LaplacianMatrix::getSimilarrityMatrix(std::vector<std::vector<double>>a)
+{
+	similarityMatrix = a;
 }

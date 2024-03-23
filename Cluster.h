@@ -19,6 +19,11 @@ struct Point3D
 	double Y;
 	double Z;
 };
+struct Vertex
+{
+	double x, y, z;
+	int r, g, b;
+};
 
 typedef struct Line3D
 {
@@ -69,7 +74,7 @@ namespace SpectralClustring
 
 		double linepearsonCorrelation(Line3D line1, Line3D line2);//直线间相似性计算：-1至1，越接近1越相似
 		double angleGap(Line3D line1, Line3D line2);//直线间角度差计算，返回弧度值
-		LinearFeature linearFeature(Line3D line);//计算单条直线在坐标系下的中点坐标，与x轴y轴的夹角
+		//LinearFeature linearFeature(Line3D line);//计算单条直线在坐标系下的中点坐标，与x轴y轴的夹角
 
 		double straightLineDistance(Line3D line1, Line3D line2);//计算直线间距离
 		double pointLineDistance(Line3D line, Line3D point);//如果平行，则计算点与直线的距离
@@ -129,7 +134,11 @@ namespace SpectralClustring
 		void calcuCluster();
 		void writeLinesToPLY(const std::string& filename, const std::vector<Line3D>& lines, const std::vector<int>& centerIDs);
 		//Line3D findLineByID(int targetID)const;
+		std::vector<Line3D> outLines();
+		std::vector<int>outID();
+		void getSimilarrityMatrix(std::vector<std::vector<double>>);
 	};
 	std::vector<Line3D> readLinesFromPLY(const std::string& filename);
+	bool readPointFromPLY(const std::string& filename, std::vector<Vertex>& vertices);
 	void spectralClustringComoleteFlowScheme(std::vector<Line3D>);
 }
