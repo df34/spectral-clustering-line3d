@@ -203,7 +203,7 @@ double SpectralClustring::PointSimilarity::assignmentSimilarity(Line3D line1, Li
 	double p1 = 0.4, p2 = 0.3, p3 = 0.3;
 	double similarity = 0;
 	double angle = angleGap(line1, line2);
-	if (angle < M_PI / 12)
+	if (angle < M_PI / 24)
 	{
 		double lineDistance = straightLineDistance(line1, line2);
 		MinMaxDistance minMaxDistances = minMaxDistance();
@@ -219,16 +219,27 @@ double SpectralClustring::PointSimilarity::assignmentSimilarity(Line3D line1, Li
 
 void SpectralClustring::PointSimilarity::updateSimilarityMatrix(Line3D line1, Line3D line2)
 {
-	double similarity = assignmentSimilarity(line1, line2);
-
-	// 将计算的相似度赋给对应直线的行列
 	int id1 = line1.ID;
 	int id2 = line2.ID;
+
+	// 检查矩阵中是否已经存在相似度值，如果存在则不进行计算
+	if (id1 < similarityMatrix.size() && id2 < similarityMatrix[id1].size() && similarityMatrix[id1][id2] != 0.0)
+	{
+		return;
+	}
+
+	double similarity = assignmentSimilarity(line1, line2);
 
 	// 确保 similarityMatrix 具有足够的大小
 	int newSize = std::max(id1, id2) + 1;
 	if (similarityMatrix.size() < newSize)
 	{
+		// 扩展行
+		for (int i = 0; i < similarityMatrix.size(); ++i)
+		{
+			similarityMatrix[i].resize(newSize, 0.0);
+		}
+		// 扩展列
 		similarityMatrix.resize(newSize, std::vector<double>(newSize, 0.0));
 	}
 
