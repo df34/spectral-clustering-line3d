@@ -6,13 +6,20 @@
 #include<Eigen/Eigenvalues>
 #include<Eigen/src/Eigenvalues/EigenSolver.h>
 #include<Eigen/Sparse>
+#include<Eigen/Dense>
 #include <Spectra/SymEigsSolver.h>
 #include<Spectra/MatOp/SparseSymMatProd.h>
+#include<Spectra/MatOp/DenseSymMatProd.h>
+#include<Spectra/MatOp/SparseSymShiftSolve.h>
+#include<Spectra/SymEigsShiftSolver.h>
+#include<Spectra/DavidsonSymEigsSolver.h>
 #include<random>
 #include<algorithm>
 #include<opencv2/opencv.hpp>
 #include<fstream>
 #include<chrono>
+#include<limits>
+
 //#include<matplotlibcpp.h>
 
 #define M_PI 3.14159265358979323846
@@ -148,6 +155,11 @@ double SpectralClustring::PointSimilarity::pointLineDistance(Line3D line, Line3D
 
 	return distance;
 }
+double SpectralClustring::PointSimilarity::guassianSimilarity(Line3D line1, Line3D line2,double sigma)
+{
+	double distance = straightLineDistance(line1, line2);
+	return exp(-distance * distance / (2 * sigma * sigma));
+}
 
 double SpectralClustring::PointSimilarity::normalizedDistance(double lineDistance, MinMaxDistance distance)
 {
@@ -164,7 +176,7 @@ double SpectralClustring::PointSimilarity::normalizedDistance(double lineDistanc
 }
 
 
-MinMaxDistance SpectralClustring::PointSimilarity::minMaxDistance()
+void SpectralClustring::PointSimilarity::minMaxDistance()
 {
 	double minDist = std::numeric_limits<double>::max();
 	double maxDist = std::numeric_limits<double>::lowest();
@@ -177,7 +189,8 @@ MinMaxDistance SpectralClustring::PointSimilarity::minMaxDistance()
 			maxDist = std::max(maxDist, dist);
 		}
 	}
-	return { minDist, maxDist };
+	minMaxDistances.maxDistance = maxDist;
+	minMaxDistances.minDistance = minDist;
 }
 
 double SpectralClustring::PointSimilarity::normalizedAngleGap(double angle)
@@ -198,17 +211,18 @@ double SpectralClustring::PointSimilarity::normalizedLinepearsonCorrelation(doub
 	return normalized;
 }
 
+
 double SpectralClustring::PointSimilarity::assignmentSimilarity(Line3D line1, Line3D line2)
 {
-	double p1 = 0.4, p2 = 0.3, p3 = 0.3;
+	//double p1 = 0.4, p2 = 0.3, p3 = 0.3;
 	double similarity = 0;
 	double angle = angleGap(line1, line2);
 	if (angle < M_PI / 24)
 	{
-		double lineDistance = straightLineDistance(line1, line2);
-		MinMaxDistance minMaxDistances = minMaxDistance();
+		//double lineDistance = straightLineDistance(line1, line2);
 		double corr = linepearsonCorrelation(line1, line2);
-		similarity = p1 * normalizedDistance(lineDistance, minMaxDistances) + p2 * normalizedAngleGap(angle) + p3 * normalizedLinepearsonCorrelation(corr);
+		similarity = normalizedDistance(guassianSimilarity(line1, line2, 0.1), minMaxDistances);
+		//similarity = p1 * normalizedDistance(guassianSimilarity(line1,line2,0.1), minMaxDistances) + p2 * normalizedAngleGap(angle) + p3 * normalizedLinepearsonCorrelation(corr);
 	}
 	else
 	{
@@ -245,6 +259,7 @@ void SpectralClustring::PointSimilarity::updateSimilarityMatrix(Line3D line1, Li
 
 	similarityMatrix[id1][id2] = similarity;
 	similarityMatrix[id2][id1] = similarity;
+
 }
 
 
@@ -271,11 +286,12 @@ double PointSimilarity::getSimilarity(int row, int col) const
 	}
 }
 
-void SpectralClustring::LaplacianMatrix::calculateMetricMatrix(std::vector<std::vector<double>>& metricMatrix)
+void SpectralClustring::LaplacianMatrix::calculateMetricMatrix()
 {
 	metricMatrix.clear();
 	metricMatrix.resize(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
-	//计算对角线元素，对应节点的所有权值的累加值
+
+	// 计算度矩阵
 	for (size_t i = 0; i < similarityMatrix.size(); ++i)
 	{
 		double sum = 0.0;
@@ -285,91 +301,149 @@ void SpectralClustring::LaplacianMatrix::calculateMetricMatrix(std::vector<std::
 		}
 		metricMatrix[i][i] = sum;
 	}
-	for (size_t i = 0; i < metricMatrix.size(); ++i)
+}
+void SpectralClustring::LaplacianMatrix::calculateNormalizedLaplacianMatrix()
+{
+	std::vector<std::vector<double>>normalizedLaplacianMatrixs;
+	normalizedLaplacianMatrixs.clear();
+	normalizedLaplacianMatrixs.resize(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
+	//normalizedLaplacianMatrixs.assign(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
+	// 计算度矩阵和未标准化拉普拉斯矩阵
+	std::vector<double> degrees(similarityMatrix.size(), 0.0);
+	std::vector<std::vector<double>> unnormalizedLaplacian(similarityMatrix.size(), std::vector<double>(similarityMatrix.size(), 0.0));
+
+	for (size_t i = 0; i < similarityMatrix.size(); ++i)
 	{
-		metricMatrix[i][i] = i; // 假设节点的ID就是索引值
+		for (size_t j = 0; j < similarityMatrix[i].size(); ++j)
+		{
+			degrees[i] += similarityMatrix[i][j];
+			unnormalizedLaplacian[i][j] = -similarityMatrix[i][j];
+		}
+		unnormalizedLaplacian[i][i] = degrees[i];
+	}
+
+	// 计算 D^{-1/2}
+	std::vector<double> D_sqrt_inv(degrees.size());
+	for (size_t i = 0; i < degrees.size(); ++i)
+	{
+		// 添加容错机制，确保分母不为零
+		if (degrees[i] > 1e-6) {
+			D_sqrt_inv[i] = 1.0 / std::sqrt(degrees[i]);
+		}
+		else {
+			D_sqrt_inv[i] = 0.0;  // 或者使用其他合适的值来避免除以零
+		}
+	}
+
+	// 计算标准化后的拉普拉斯矩阵 D^{-1/2} L D^{-1/2}
+	for (size_t i = 0; i < similarityMatrix.size(); ++i)
+	{
+		for (size_t j = 0; j < similarityMatrix[i].size(); ++j)
+		{
+			normalizedLaplacianMatrixs[i][j] = D_sqrt_inv[i] * unnormalizedLaplacian[i][j] * D_sqrt_inv[j];
+		}
+	}
+	LaplacianMatrixs.clear();
+	LaplacianMatrixs.resize(normalizedLaplacianMatrixs.size(), std::vector<double>(normalizedLaplacianMatrixs.size(), 0.0));
+	for (size_t i = 0; i < normalizedLaplacianMatrixs.size(); ++i) {
+		for (size_t j = 0; j < normalizedLaplacianMatrixs[i].size(); ++j) {
+			LaplacianMatrixs[i][j] = normalizedLaplacianMatrixs[i][j];
+		}
 	}
 }
 
 void SpectralClustring::LaplacianMatrix::calculateLaplacianMatrix()
 {
-	LaplacianMatrix.clear();
-	LaplacianMatrix.resize(metricMatrix.size(), std::vector<double>(metricMatrix.size(), 0.0));
+	LaplacianMatrixs.clear();
+	LaplacianMatrixs.resize(metricMatrix.size(), std::vector<double>(metricMatrix.size(), 0.0));
 
 	// 计算拉普拉斯矩阵
 	for (size_t i = 0; i < metricMatrix.size(); ++i)
 	{
+		double degree = 0.0; // 节点的度数
+		for (size_t j = 0; j < metricMatrix[i].size(); ++j)
+		{
+			degree += metricMatrix[i][j];
+		}
+
 		for (size_t j = 0; j < metricMatrix[i].size(); ++j)
 		{
 			if (i == j)
 			{
 				// 对角线元素为节点的度数
-				LaplacianMatrix[i][j] = metricMatrix[i][j];
+				LaplacianMatrixs[i][j] = degree;
 			}
 			else
 			{
 				// 非对角线元素为相似度或连接权重的负值
-				LaplacianMatrix[i][j] = -metricMatrix[i][j];
+				LaplacianMatrixs[i][j] = -metricMatrix[i][j];
 			}
 		}
 	}
+	std::cout << "end";
 
-	// D - W
-	for (size_t i = 0; i < metricMatrix.size(); ++i)
-	{
-		for (size_t j = 0; j < metricMatrix[i].size(); ++j)
-		{
-			LaplacianMatrix[i][j] = metricMatrix[i][j] - LaplacianMatrix[i][j];
-		}
-	}
 }
 
-void SpectralClustring::LaplacianMatrix::convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix)
+//void SpectralClustring::LaplacianMatrix::convertToSparseMatrix()
+//{
+//	if (LaplacianMatrixs.empty()) {
+//		// 处理异常情况，如 denseMatrix 为空
+//		return;
+//	}
+//
+//	int rows = LaplacianMatrixs.size();
+//	int cols = LaplacianMatrixs[0].size();
+//
+//	// 遍历稠密矩阵，将非零元素添加到稀疏矩阵中
+//	std::vector<Triplet<double>> triplets;
+//	for (int i = 0; i < rows; ++i)
+//	{
+//		if (LaplacianMatrixs[i].size() != cols) {
+//			// 处理异常情况，如 denseMatrix 中的行长度不一致
+//			return;
+//		}
+//
+//		for (int j = 0; j < cols; ++j)
+//		{
+//			if (LaplacianMatrixs[i][j] != 0.0)
+//			{
+//				triplets.push_back(Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+//			}
+//		}
+//	}
+//
+//	// 创建一个稀疏矩阵
+//	SparseMatrix<double> sparseMatrix(rows, cols);
+//	sparseMatrix.setFromTriplets(triplets.begin(), triplets.end());
+//
+//	LaplacianMatrixSparse = sparseMatrix;
+//}
+
+void SpectralClustring::LaplacianMatrix::convertToSparseMatrixPlus()
 {
-	int rows = denseMatrix.size();
-	int cols = denseMatrix[0].size();
 
-	// 创建一个稀疏矩阵
-	SparseMatrix<double> sparseMatrix(rows, cols);
-
-	// 遍历稠密矩阵，将非零元素添加到稀疏矩阵中
-	std::vector<Triplet<double>> triplets;
-	for (int i = 0; i < rows; ++i)
-	{
-		for (int j = 0; j < cols; ++j)
-		{
-			if (denseMatrix[i][j] != 0.0)
-			{
-				triplets.push_back(Triplet<double>(i, j, denseMatrix[i][j]));
-			}
-		}
-	}
-
-	sparseMatrix.setFromTriplets(triplets.begin(), triplets.end());
-
-	LaplacianMatrixSparse = sparseMatrix;
 }
 
-void SpectralClustring::LaplacianMatrix::calSparseMatrix()
-{
-	// 创建稀疏矩阵的三元组表示
-	std::vector<Eigen::Triplet<double>> tripletList;
-
-	// 遍历密集矩阵的元素，将非零元素添加到三元组列表中
-	for (int i = 0; i < LaplacianMatrix.size(); ++i) {
-		for (int j = 0; j < LaplacianMatrix[i].size(); ++j) {
-			if (LaplacianMatrix[i][j] != 0.0) {
-				tripletList.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrix[i][j]));
-			}
-		}
-	}
-
-	// 将三元组列表设置为稀疏矩阵的值
-	LaplacianMatrixSparse.setFromTriplets(tripletList.begin(), tripletList.end());
-
-	// 完成矩阵插入后进行最终化
-	LaplacianMatrixSparse.finalize();
-}
+//void SpectralClustring::LaplacianMatrix::calSparseMatrix()
+//{
+//	// 创建稀疏矩阵的三元组表示
+//	std::vector<Eigen::Triplet<double>> tripletList;
+//
+//	// 遍历密集矩阵的元素，将非零元素添加到三元组列表中
+//	for (int i = 0; i < LaplacianMatrixs.size(); ++i) {
+//		for (int j = 0; j < LaplacianMatrixs[i].size(); ++j) {
+//			if (LaplacianMatrixs[i][j] != 0.0) {
+//				tripletList.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+//			}
+//		}
+//	}
+//
+//	// 将三元组列表设置为稀疏矩阵的值
+//	LaplacianMatrixSparse.setFromTriplets(tripletList.begin(), tripletList.end());
+//
+//	// 完成矩阵插入后进行最终化
+//	LaplacianMatrixSparse.finalize();
+//}
 
 void SpectralClustring::LaplacianMatrix::computeEigen()
 {
@@ -377,6 +451,7 @@ void SpectralClustring::LaplacianMatrix::computeEigen()
 	VectorXcd eigenvalues = es.eigenvalues();
 	MatrixXcd eigenvectors = es.eigenvectors();*/
 	SparseSymMatProd<double>op(LaplacianMatrixSparse);
+	std::cout << LaplacianMatrixSparse.rows();
 	Spectra::SymEigsSolver< Spectra::SparseSymMatProd<double> > eigs(op, LaplacianMatrixSparse.rows(), 2 * LaplacianMatrixSparse.rows());
 	eigs.init();
 	int nconv = eigs.compute();
@@ -405,6 +480,214 @@ void SpectralClustring::LaplacianMatrix::computeEigen()
 		std::cout << "Eigenvector: " << pair.second.transpose() << std::endl;
 	}
 }
+
+void SpectralClustring::LaplacianMatrix::computeEigenPlus()
+{
+	if (LaplacianMatrixs.empty()) {
+		// 处理异常情况，如 LaplacianMatrixs 为空
+		return;
+	}
+
+	int rows = LaplacianMatrixs.size();
+	int cols = LaplacianMatrixs[0].size();
+
+	// 将 LaplacianMatrixs 转换为稀疏矩阵 LaplacianMatrixSparse
+	if (LaplacianMatrixSparse.rows() != rows || LaplacianMatrixSparse.cols() != cols) {
+		// 重新分配稀疏矩阵大小
+		LaplacianMatrixSparse.resize(rows, cols);
+	}
+
+	// 遍历稠密矩阵，将非零元素添加到稀疏矩阵中
+	std::vector<Triplet<double>> triplets;
+	for (int i = 0; i < rows; ++i) {
+		if (LaplacianMatrixs[i].size() != cols) {
+			// 处理异常情况，如 denseMatrix 中的行长度不一致
+			return;
+		}
+
+		for (int j = 0; j < cols; ++j) {
+			if (LaplacianMatrixs[i][j] != 0.0) {
+				triplets.push_back(Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+			}
+		}
+	}
+
+	// 创建一个稀疏矩阵
+	LaplacianMatrixSparse.setFromTriplets(triplets.begin(), triplets.end());
+
+	// 使用 SymEigsSolver 求解特征值和特征向量
+	SparseSymMatProd<double> op(LaplacianMatrixSparse);
+	Spectra::SymEigsSolver< Spectra::SparseSymMatProd<double> > eigs(op, 2, 2 * LaplacianMatrixSparse.rows());
+	eigs.init();
+	int nconv = eigs.compute();
+
+	// 获取特征值
+	Eigen::VectorXd eigenvalues;
+	if (eigs.info() == Spectra::CompInfo::Successful) {
+		eigenvalues = eigs.eigenvalues();
+	}
+
+	// 获取特征向量
+	Eigen::MatrixXd eigenvectors;
+	if (eigs.info() == Spectra::CompInfo::Successful) {
+		eigenvectors = eigs.eigenvectors();
+	}
+
+	// 将特征值和特征向量存储到一个键对的数组中
+	for (int i = 0; i < eigenvalues.size(); ++i) {
+		eigen_pairs.push_back(std::make_pair(eigenvalues[i], eigenvectors.col(i)));
+	}
+
+	// 打印特征值和特征向量
+	for (const auto& pair : eigen_pairs) {
+		std::cout << "Eigenvalue: " << pair.first << std::endl;
+		std::cout << "Eigenvector: " << pair.second.transpose() << std::endl;
+	}
+}
+void SpectralClustring::LaplacianMatrix::computeEigenPlusPlus()
+{
+	std::vector<Eigen::Triplet<double>> triplets;
+	for (int i = 0; i < LaplacianMatrixs.size(); ++i) {
+		for (int j = 0; j < LaplacianMatrixs[i].size(); ++j) {
+			if (LaplacianMatrixs[i][j] != 0.0) {
+				triplets.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+			}
+		}
+	}
+	Eigen::SparseMatrix<double> LaplacianMatrixSparses(LaplacianMatrixs.size(), LaplacianMatrixs.size());
+	LaplacianMatrixSparses.setFromTriplets(triplets.begin(), triplets.end());
+	Spectra::SparseSymMatProd<double>op(LaplacianMatrixSparses);
+	int k = LaplacianMatrixSparses.rows() - 2;
+	int m = LaplacianMatrixSparses.rows() - 1;
+	Eigen::VectorXd eigenvalues;
+	Eigen::MatrixXd eigenvectors;
+	Spectra::SymEigsSolver< Spectra::SparseSymMatProd<double> > eigs(op, k, m);
+	eigs.init();
+	int nconv = eigs.compute();
+	if (eigs.info() == Spectra::CompInfo::Successful) {
+		eigenvalues = eigs.eigenvalues();
+		eigenvectors = eigs.eigenvectors();
+	}
+	// 将特征值和特征向量存储到一个键对的数组中
+	for (int i = 0; i < eigenvalues.size(); ++i) {
+		eigen_pairs.push_back(std::make_pair(eigenvalues[i], eigenvectors.col(i)));
+	}
+	// 打印特征值和特征向量
+	
+	for (const auto& pair : eigen_pairs) {
+		std::cout << "Eigenvalue: " << pair.first << std::endl;
+		std::cout << "Eigenvector: " << pair.second.transpose() << std::endl;
+	}
+	
+}
+void SpectralClustring::LaplacianMatrix::computeEigenRandomized()
+{
+	std::vector<Eigen::Triplet<double>> triplets;
+	for (int i = 0; i < LaplacianMatrixs.size(); ++i) {
+		for (int j = 0; j < LaplacianMatrixs[i].size(); ++j) {
+			if (LaplacianMatrixs[i][j] != 0.0) {
+				triplets.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+			}
+		}
+	}
+
+	Eigen::SparseMatrix<double> LaplacianMatrixSparse(LaplacianMatrixs.size(), LaplacianMatrixs.size());
+	LaplacianMatrixSparse.setFromTriplets(triplets.begin(), triplets.end());
+
+	// 随机化算法的参数
+	int subspace_dim = 10; // 子空间的维度，可以根据需要调整
+
+	// 创建随机数生成器
+	std::default_random_engine generator;
+	std::normal_distribution<double> distribution(0.0, 1.0);
+
+	// 生成随机矩阵
+	Eigen::MatrixXd random_matrix(LaplacianMatrixSparse.rows(), subspace_dim);
+	for (int i = 0; i < random_matrix.rows(); ++i) {
+		for (int j = 0; j < random_matrix.cols(); ++j) {
+			random_matrix(i, j) = distribution(generator);
+		}
+	}
+
+	// 计算投影矩阵
+	Eigen::MatrixXd projection = LaplacianMatrixSparse * random_matrix;
+
+	// 计算投影矩阵的 SVD
+	Eigen::JacobiSVD<Eigen::MatrixXd> svd(projection, Eigen::ComputeThinU | Eigen::ComputeThinV);
+
+	// 提取近似特征向量
+	Eigen::MatrixXd eigenvectors = svd.matrixU();
+
+	// 计算近似特征值
+	Eigen::VectorXd eigenvalues = svd.singularValues();
+
+	// 打印近似特征值和特征向量
+	for (int i = 0; i < eigenvalues.size(); ++i) {
+		std::cout << "近似特征值: " << eigenvalues[i] << std::endl;
+		std::cout << "近似特征向量: " << eigenvectors.col(i).transpose() << std::endl;
+	}
+}
+void SpectralClustring::LaplacianMatrix::computeEigenShift()
+{
+	/*std::vector<Eigen::Triplet<double>> triplets;
+	for (int i = 0; i < LaplacianMatrixs.size(); ++i) {
+		for (int j = 0; j < LaplacianMatrixs[i].size(); ++j) {
+			if (LaplacianMatrixs[i][j] != 0.0) {
+				triplets.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+			}
+		}
+	}*/
+
+	std::vector<Eigen::Triplet<double>> triplets;
+	for (int i = 0; i < LaplacianMatrixs.size(); ++i) {
+		for (int j = 0; j < LaplacianMatrixs[i].size(); ++j) {
+			if (LaplacianMatrixs[i][j] != 0.0) {
+				triplets.push_back(Eigen::Triplet<double>(i, j, LaplacianMatrixs[i][j]));
+			}
+		}
+	}
+	/*int rows = LaplacianMatrixs.size();
+	int cols = LaplacianMatrixs[0].size();
+	MatrixXd matrix(rows, cols);
+	for (int i = 0; i < rows; i++)
+	{
+		for (int j = 0; j < cols; j++)
+			matrix(i, j) = LaplacianMatrixs[i][j];
+	}
+	DenseSymShiftSolve<double>op(matrix);*/
+
+	//Eigen::SparseMatrix<double> LaplacianMatrixSparse(LaplacianMatrixs.size(), LaplacianMatrixs.size());
+	Eigen::SparseMatrix<double> LaplacianMatrixSparse(LaplacianMatrixs.size(), LaplacianMatrixs.size());
+	LaplacianMatrixSparse.setFromTriplets(triplets.begin(), triplets.end());
+
+	// 使用 Spectra 的移位和反转策略
+	Spectra::SparseSymShiftSolve<double> op(LaplacianMatrixSparse);
+	double sigma = 1e-10; // 移位量，接近零的小正数
+	int nev = 500;
+	int ncv = std::max(2 * nev, 20);
+	Spectra::SymEigsShiftSolver< Spectra::SparseSymShiftSolve<double> > eigs(op, nev, ncv, sigma);
+
+	// 初始化和计算
+	eigs.init();
+	int nconv = eigs.compute(Spectra::SortRule::LargestAlge);//寻找最小的特征值
+
+	// 检查结果是否成功
+	if (eigs.info() == Spectra::CompInfo::Successful) {
+		Eigen::VectorXd eigenvalues = eigs.eigenvalues();
+		Eigen::MatrixXd eigenvectors = eigs.eigenvectors();
+
+		// 存储特征值和特征向量
+		for (int i = 0; i < eigenvalues.size(); ++i) {
+			eigen_pairs.push_back(std::make_pair(eigenvalues[i], eigenvectors.col(i)));
+		}
+
+		// 打印特征值和特征向量
+		/*for (const auto& pair : eigen_pairs) {
+			std::cout << "Eigenvalue: " << pair.first << std::endl;
+			std::cout << "Eigenvector: " << pair.second.transpose() << std::endl;
+		}*/
+	}
+}
 void SpectralClustring::LaplacianMatrix::fileterEigenPairs()
 {
 	// 筛选特征值大小
@@ -431,50 +714,130 @@ void SpectralClustring::LaplacianMatrix::fileterEigenPairs()
 
 	eigen_pairs = filteredEigenPairs;
 }
-
-std::vector<int> SpectralClustring::LaplacianMatrix::kMeansClustering(const std::vector<Eigen::VectorXd>& data, int k, int maxIterations)
+void SpectralClustring::LaplacianMatrix::normalizeEigenPairs()
 {
-	// 初始化聚类中心
-	std::vector<Eigen::VectorXd> centroids(k);
-	std::random_device rd;
-	std::mt19937 gen(rd());
-	std::uniform_int_distribution<int> dist(0, data.size() - 1);
-	for (int i = 0; i < k; ++i) {
-		centroids[i] = data[dist(gen)];
+	for (size_t i = 0; i < eigenPairs.size(); ++i)
+	{
+		double norm = eigenPairs[i].norm();
+		eigenPairs[i] /= norm;
 	}
+}
+void SpectralClustring::LaplacianMatrix::storeEigenPairs()
+{
+	F.clear();
+	F.reserve(eigenPairs.size());
+	for (size_t i = 0; i < eigenPairs.size(); ++i)
+	{
+		F.push_back(eigenPairs[i]);
+	}
+}
+std::vector<int> SpectralClustring::LaplacianMatrix::kMeansClustering(const std::vector<Eigen::VectorXd>& data, const std::vector<Eigen::VectorXd>& centroids, int maxIterations)
+{
+	/*if (data.empty() || centroids.empty() || centroids.size() >= data.size() || maxIterations <= 0) {
+		throw std::invalid_argument("Invalid arguments for kMeansClustering.");
+	}
+	std::cout << "done" << std::endl;*/
+	bool changed = true;
+	std::vector<int> assignments(data.size(), 0); // 使用data的大小来初始化assignments
+	
+	int iter = 0;
+	std::vector<Eigen::VectorXd> updatedCentroids(centroids.begin(), centroids.end()); // 创建一个可修改的副本
 
-	// 开始迭代
-	std::vector<int> assignments(data.size());
-	for (int iter = 0; iter < maxIterations; ++iter) {
+	while (iter < maxIterations && changed) {
+		changed = false;
 		// 分配样本到最近的聚类中心
 		for (size_t i = 0; i < data.size(); ++i) {
-			double minDistance = (data[i] - centroids[0]).norm();
-			assignments[i] = 0;
-			for (int j = 1; j < k; ++j) {
-				double distance = (data[i] - centroids[j]).norm();
+			double minDistance = std::numeric_limits<double>::max();
+			int clusterIndex = -1;
+			for (size_t j = 0; j < centroids.size(); ++j) {
+				double distance = (data[i] - centroids[j]).squaredNorm();
 				if (distance < minDistance) {
 					minDistance = distance;
-					assignments[i] = j;
+					clusterIndex = static_cast<int>(j);
 				}
+			}
+			if (assignments[i] != clusterIndex) {
+				assignments[i] = clusterIndex;
+				changed = true;
 			}
 		}
 
 		// 更新聚类中心
-		std::vector<int> counts(k, 0);
-		std::vector<Eigen::VectorXd> sums(k, Eigen::VectorXd::Zero(data[0].size()));
-		for (size_t i = 0; i < data.size(); ++i) {
-			int cluster = assignments[i];
-			sums[cluster] += data[i];
-			counts[cluster]++;
+		std::vector<Eigen::VectorXd> newCentroids(centroids.size(), Eigen::VectorXd::Zero(data[0].size()));
+		std::vector<int> counts(centroids.size(), 0);
+		for (size_t i = 0; i < assignments.size(); ++i) {
+			newCentroids[assignments[i]] += data[i];
+			counts[assignments[i]]++;
 		}
-		for (int i = 0; i < k; ++i) {
-			if (counts[i] > 0) {
-				centroids[i] = sums[i] / counts[i];
+		for (size_t j = 0; j < centroids.size(); ++j) {
+			if (counts[j] > 0) {
+				updatedCentroids[j] = (newCentroids[j].array() / static_cast<double>(counts[j])).matrix();
 			}
 		}
+		iter++;
 	}
 
 	return assignments;
+}
+std::vector<Eigen::VectorXd> SpectralClustring::LaplacianMatrix::kMeansClusteringPlus(const std::vector<Eigen::VectorXd>& data, int k)
+{
+	std::vector<Eigen::VectorXd> centroids;
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<> dis(0, data[0].size() - 1); // Assuming all rows have the same size
+
+	// Randomly select the first centroid
+	Eigen::VectorXd firstCentroid(data[0].size());
+	//Eigen::VectorXd database(data[0].size());
+	/*if (!data.empty())
+	{
+		for (int j=0;j<data.size();j++)
+		{
+			for (int i = 0; i < data[0].size(); i++)
+			{
+				database[j] += data[j][i];
+			}
+		}
+	}*/
+	for (int i = 0; i < data.size(); i++)
+	{
+		int index = dis(gen);
+		if (index >= data.size())
+		{
+			std::cout << "Error: Index out of range: " << index << std::endl;
+			break;
+		}
+		firstCentroid(i) = data[index](i);
+	}
+	
+	centroids.push_back(firstCentroid);
+
+	// Select the remaining centroids
+	for (int i = 1; i < k; ++i) {
+		// Calculate the distance of each point to the nearest centroid
+		std::vector<double> distances(data.size(), std::numeric_limits<double>::max());
+		for (size_t j = 0; j < data.size(); ++j) {
+			for (const auto& centroid : centroids) {
+				double dist = (data[j] - centroid).squaredNorm();
+				distances[j] = std::min(distances[j], dist);
+			}
+		}
+
+		// Select the next centroid based on the distances
+		double sum = std::accumulate(distances.begin(), distances.end(), 0.0);
+		std::uniform_real_distribution<> distr(0, sum);
+		double r = distr(gen);
+
+		sum = 0.0;
+		for (size_t j = 0; j < distances.size(); ++j) {
+			sum += distances[j];
+			if (sum >= r) {
+				centroids.push_back(data[j]);
+				break;
+			}
+		}
+	}
+	return centroids;
 }
 
 int SpectralClustring::LaplacianMatrix::selectKByElbowMethod(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations)
@@ -530,7 +893,8 @@ double SpectralClustring::LaplacianMatrix::silhouetteScore(const std::vector<Eig
 		// 计算样本 i 到同簇其他样本的平均距离（簇内距离）
 		for (size_t j = 0; j < data.size(); ++j) {
 			if (assignments[j] == cluster && i != j) {
-				intraClusterDistance += (data[i] - data[j]).norm();
+				double distance = (data[i] - data[j]).norm();
+				intraClusterDistance += distance;
 				numPointsInCluster++;
 			}
 		}
@@ -598,11 +962,16 @@ int SpectralClustring::LaplacianMatrix::selectK(const std::vector<Eigen::VectorX
 {
 	std::vector<double> silhouetteScores(maxK - 1, 0.0);
 	std::vector<double> clusterLosses(maxK - 1, 0.0);
-
-	for (int k = 2; k <= maxK; ++k) {
-		std::vector<int> assignments = kMeansClustering(data, k, maxIterations);
+	const double minClusterLossThreshold = 0.001; // 设定一个较小的阈值
+	for (int k = 4; k <= maxK; ++k) {
+		std::vector<Eigen::VectorXd> centroids = kMeansClusteringPlus(data, k);
+		std::vector<int> assignments = kMeansClustering(data, centroids, maxIterations);
 		silhouetteScores[k - 2] = silhouetteScore(data, assignments);
 		clusterLosses[k - 2] = calculateClusterLoss(data, assignments);
+		// 如果聚类损失小于阈值，跳出循环
+		if (clusterLosses[k - 2] < minClusterLossThreshold) {
+			break;
+		}
 	}
 
 	// 计算轮廓系数的均值
@@ -617,16 +986,18 @@ int SpectralClustring::LaplacianMatrix::selectK(const std::vector<Eigen::VectorX
 	// 根据轮廓系数和聚类损失的变化情况选择最优的 K 值
 	int bestK = 2;
 	double bestScore = -1.0;
-	for (int k = 2; k <= maxK; ++k) {
-		double score = silhouetteScores[k - 2] + (clusterLossChanges[k - 3] / clusterLosses[k - 2]);
-		if (score > bestScore) {
-			bestScore = score;
-			bestK = k;
+	for (int k = 2; k < maxK; ++k) {
+		if (clusterLosses[k - 1] != 0.0) {
+			double score = silhouetteScores[k - 2] + (clusterLossChanges[k - 2] / clusterLosses[k - 1]);
+			if (score > bestScore) {
+				bestScore = score;
+				bestK = k;
+			}
 		}
 	}
-
 	return bestK;
 }
+
 
 //void SpectralClustring::LaplacianMatrix::plotSilhouetteAndLoss(const std::vector<double>& silhouetteScores, const std::vector<double>& clusterLosses, int maxK)
 //{
@@ -656,6 +1027,45 @@ int SpectralClustring::LaplacianMatrix::selectK(const std::vector<Eigen::VectorX
 //	cv::waitKey(0);
 //}
 
+std::vector<int> SpectralClustring::LaplacianMatrix::kMeansClustering(const std::vector<Eigen::VectorXd>& data, int k, int maxIterations)
+{
+	if (data.empty() || k <= 0 || k > data.size() || maxIterations <= 0) {
+		throw std::invalid_argument("Invalid arguments for kMeansClustering.");
+	}
+	// 初始化聚类中心
+	std::vector<Eigen::VectorXd> centroids= kMeansClusteringPlus(data, k);
+	std::random_device rd;
+	std::mt19937 gen(rd());
+	std::uniform_int_distribution<int> dist(0, data.size() - 1);
+	for (int i = 0; i < k; ++i) {
+		centroids[i] = data[dist(gen)];
+	}
+	// 开始迭代
+	std::vector<int> assignments(data.size(), -1);
+	bool changed = true;
+	int iter = 0;
+	while (iter < maxIterations && changed) {
+		changed = false;
+		// 分配样本到最近的聚类中心
+		for (size_t i = 0; i < data.size(); ++i) {
+			double minDistance = std::numeric_limits<double>::max();
+			int clusterIndex = -1;
+			for (int j = 0; j < k; ++j) {
+				double distance = (data[i] - centroids[j]).squaredNorm();
+				if (distance < minDistance) {
+					minDistance = distance;
+					clusterIndex = j;
+				}
+			}
+			if (assignments[i] != clusterIndex)
+			{
+				assignments[i] = clusterIndex;
+				changed = true;
+			}
+		}
+	}
+}
+
 void SpectralClustring::LaplacianMatrix::extractVector()
 {
 	for (const auto& pair : eigen_pairs) 
@@ -664,19 +1074,24 @@ void SpectralClustring::LaplacianMatrix::extractVector()
 	}
 }
 
-void SpectralClustring::LaplacianMatrix::kMeansClustering(const std::vector<std::pair<double, Eigen::VectorXd>>& eigen_pairs)
+void SpectralClustring::LaplacianMatrix::kMeansClustering()
 {
 	// 提取特征向量
 	std::vector<Eigen::VectorXd> data;
-	for (const auto& pair : eigen_pairs) {
+	data.resize(F.size());
+	/*for (const auto& pair : eigen_pairs) {
 		data.push_back(pair.second);
-	}
-
+	}*/
+	std::copy(F.begin(), F.end(), data.begin());
 	// 选择最佳的 K 值
-	int k = selectK(data, 1000, 1000); // 假设最大 K 值为 10，最大迭代次数为 100
-
+	//int k = selectKByElbowMethod(data, 100, 100);
+	int k = selectK(data, 100, 100); // 假设最大 K 值为 10，最大迭代次数为 100
+	std::vector<Eigen::VectorXd>data1;
+	for (const auto& pair : eigen_pairs) {
+		data1.push_back(pair.second);
+	}
 	// 使用 KMeans 聚类算法进行聚类
-	std::vector<int> assignments = kMeansClustering(data, k, 1000); // 假设最大迭代次数为 100
+	std::vector<int> assignments = kMeansClustering	(data, k, 100); // 假设最大迭代次数为 100
 
 	// 输出聚类中心 ID
 	std::cout << "Cluster centers ID: ";
@@ -886,11 +1301,12 @@ void SpectralClustring::LaplacianMatrix::writeLinesToPLY(const std::string& file
 //}
 
 
-void SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>inputLines)
+std::vector<std::vector<double>> SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>inputLines)
 {
 	auto start = std::chrono::high_resolution_clock::now();
 	SpectralClustring::PointSimilarity lineSimilarityMatrix;
 	lineSimilarityMatrix.getLine(inputLines);
+	lineSimilarityMatrix.minMaxDistance();
 	for (const auto& line1 : lineSimilarityMatrix.outLine())
 	{
 		for (const auto& line2 : lineSimilarityMatrix.outLine())
@@ -902,6 +1318,7 @@ void SpectralClustring::spectralClustringComoleteFlowScheme(std::vector<Line3D>i
 	auto end = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> duration = end - start;
 	std::cout << "Calculate Similarity Matrix execution time: " << duration.count() << " seconds" << std::endl;
+	return lineSimilarityMatrix.outPutSimilarity();
 }
 
 void SpectralClustring::PointSimilarity::getLine(std::vector<Line3D>inputLines)
@@ -919,26 +1336,29 @@ std::vector<std::vector<double>> SpectralClustring::PointSimilarity::outPutSimil
 
 void SpectralClustring::LaplacianMatrix::calcuCluster()
 {
-	auto start1 = std::chrono::high_resolution_clock::now();
-	calculateMetricMatrix(similarityMatrix);
+	/*auto start1 = std::chrono::high_resolution_clock::now();
+	calculateMetricMatrix();
 	auto end1 = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> duration1 = end1 - start1;
-	std::cout << "Calculate metric matrix execution time: " << duration1.count() << " seconds" << std::endl;
+	std::cout << "Calculate metric matrix execution time: " << duration1.count() << " seconds" << std::endl;*/
 	auto start2 = std::chrono::high_resolution_clock::now();
-	calculateLaplacianMatrix();
+	//calculateLaplacianMatrix();
+	calculateNormalizedLaplacianMatrix();
 	auto end2 = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> duration2 = end2 - start2;
 	std::cout << "Calculate LaplacianMatrix matrix execution time: " << duration2.count() << " seconds" << std::endl;
-	convertToSparseMatrix(LaplacianMatrix);
+	//convertToSparseMatrix();
 	auto start3 = std::chrono::high_resolution_clock::now();
-	computeEigen();
+	computeEigenShift();
 	auto end3 = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> duration3 = end3 - start3;
 	std::cout << "Calculate eigenvalues eigenvectors execution time: " << duration3.count() << " seconds" << std::endl;
 	fileterEigenPairs();
 	extractVector();
+	normalizeEigenPairs();
+	storeEigenPairs();
 	auto start4 = std::chrono::high_resolution_clock::now();
-	kMeansClustering(eigen_pairs);
+	kMeansClustering();
 	auto end4 = std::chrono::high_resolution_clock::now();
 	std::chrono::duration<double> duration4 = end4 - start4;
 	std::cout << "Calculate Kmeans execution time: " << duration4.count() << " seconds" << std::endl;

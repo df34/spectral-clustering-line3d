@@ -82,7 +82,8 @@ namespace SpectralClustring
 		double normalizedDistance(double lineDistance,MinMaxDistance distance);//归一化距离,取反
 		double normalizedAngleGap(double angle);//归一化角度差，取反
 		double normalizedLinepearsonCorrelation(double linCorr);//归一化直线相似性
-		MinMaxDistance minMaxDistance();//计算所有空间直线的最大最小距离
+		MinMaxDistance minMaxDistances;
+		double guassianSimilarity(Line3D line1, Line3D line2,double sigma);
 
 	public:
 		void getLine(std::vector<Line3D>);
@@ -91,7 +92,7 @@ namespace SpectralClustring
 		void updateSimilarityMatrix(Line3D line1, Line3D line2);//更新相似矩阵
 		double getSimilarity(int row, int col) const;//获取对应行列相似矩阵的值
 		std::vector<std::vector<double>>outPutSimilarity();
-		
+		void minMaxDistance();//计算所有空间直线的最大最小距离
 	};
 	
 
@@ -100,26 +101,30 @@ namespace SpectralClustring
 	private:
 		std::vector<Line3D>lines;
 		std::vector<std::vector<double>> metricMatrix;
-		std::vector<std::vector<double>> LaplacianMatrix;
+		std::vector<std::vector<double>> LaplacianMatrixs;
 		std::vector<std::vector<double>> similarityMatrix;
+		
 		Eigen::SparseMatrix<double> LaplacianMatrixSparse;
 		std::vector<std::pair<double, Eigen::VectorXd>> eigen_pairs;
 		std::vector<Eigen::VectorXd> eigenPairs;
+		std::vector<Eigen::VectorXd> F;
 		std::vector<int>assignmentID;//聚类中心ID
 		std::unordered_map<int, int> nodeClusterMap;//每个节点所在的聚类中心
 		//std::vector<Line3D> outPutCentreLine();
 	public:
-		void calculateMetricMatrix(std::vector<std::vector<double>>& similarityMatrix);//计算度矩阵
+		void calculateMetricMatrix();//计算度矩阵
 		void calculateLaplacianMatrix();//计算拉普拉斯矩阵
 		//两种实现方式
-		void convertToSparseMatrix(const std::vector<std::vector<double>>& denseMatrix);//稠密矩阵转为稀疏矩阵
-		void calSparseMatrix();//稠密矩阵转为稀疏矩阵
+		//void convertToSparseMatrix();//稠密矩阵转为稀疏矩阵
+		//void calSparseMatrix();//稠密矩阵转为稀疏矩阵
 		
 		void computeEigen();//计算特征值和特征向量
 		void fileterEigenPairs();//按照特征值大小进行排序，筛选特征值为0和除0以外最大的特征值
 
 		void extractVector();//只获取特征向量
+		std::vector<int> kMeansClustering(const std::vector<Eigen::VectorXd>& data, const std::vector<Eigen::VectorXd>& centroids, int maxIterations);
 		std::vector<int> kMeansClustering(const std::vector<Eigen::VectorXd>& data, int k, int maxIterations);
+		std::vector<Eigen::VectorXd> kMeansClusteringPlus(const std::vector<Eigen::VectorXd>& data, int k);
 		//肘部法则和轮廓系数
 		int selectKByElbowMethod(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
 		double silhouetteScore(const std::vector<Eigen::VectorXd>& data, const std::vector<int>& assignments);//返回轮廓系数，-1到1，距离1越近，效果越好
@@ -129,7 +134,7 @@ namespace SpectralClustring
 		//void plotSilhouetteAndLoss(const std::vector<double>& silhouetteScores, const std::vector<double>& clusterLosses, int maxK);
 		//同时考虑
 		int selectK(const std::vector<Eigen::VectorXd>& data, int maxK, int maxIterations);//返回一个最佳的K值
-		void kMeansClustering(const std::vector<std::pair<double, Eigen::VectorXd>>& eigen_pairs);
+		void kMeansClustering();
 		void fstreamLine();//输出聚类中心的点的坐标
 		void calcuCluster();
 		void writeLinesToPLY(const std::string& filename, const std::vector<Line3D>& lines, const std::vector<int>& centerIDs);
@@ -137,8 +142,16 @@ namespace SpectralClustring
 		std::vector<Line3D> outLines();
 		std::vector<int>outID();
 		void getSimilarrityMatrix(std::vector<std::vector<double>>);
+		void convertToSparseMatrixPlus();
+		void computeEigenPlus();
+		void computeEigenPlusPlus();
+		void computeEigenRandomized();
+		void computeEigenShift();
+		void calculateNormalizedLaplacianMatrix();
+		void normalizeEigenPairs();//标准化特征向量
+		void storeEigenPairs();//存储到特征矩阵中
 	};
 	std::vector<Line3D> readLinesFromPLY(const std::string& filename);
 	bool readPointFromPLY(const std::string& filename, std::vector<Vertex>& vertices);
-	void spectralClustringComoleteFlowScheme(std::vector<Line3D>);
+	std::vector<std::vector<double>> spectralClustringComoleteFlowScheme(std::vector<Line3D>);
 }
